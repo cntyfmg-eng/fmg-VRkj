@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>第18课《颐和园》VR互动课件</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{width:100%;height:100%;overflow:hidden;font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#1c2430;}
+  #app{position:fixed;inset:0;}
+  #app canvas{display:block;cursor:grab;}
+  #app.dragging canvas{cursor:grabbing;}
+  /* 场景切换「缩放进入」过渡：旧场景缩小淡出 → 新场景由小放大淡入 */
+  #app,#hotspots{transition:transform .45s cubic-bezier(.22,.61,.36,1),opacity .45s ease;}
+  #app.t-out,#hotspots.t-out{transition:transform .2s ease,opacity .2s ease;transform:scale(1.1);opacity:0;}
+  #app.t-in,#hotspots.t-in{transition:none;transform:scale(.82);opacity:0;}
+
+  /* ===== 顶部栏 ===== */
+  #topbar{
+    position:fixed;top:0;left:0;right:0;z-index:30;
+    display:flex;align-items:center;gap:12px;padding:10px 16px;
+    background:linear-gradient(180deg,rgba(20,26,36,.82),rgba(20,26,36,0));
+    color:#fff;pointer-events:none;
+  }
+  #topbar .title{font-size:17px;font-weight:800;letter-spacing:1px;text-shadow:0 1px 4px rgba(0,0,0,.6);}
+  #topbar .title small{display:block;font-size:11.5px;font-weight:normal;opacity:.85;letter-spacing:0;}
+  #topbar .spacer{flex:1;}
+  .stamp-box{
+    pointer-events:auto;display:flex;align-items:center;gap:6px;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);
+    border-radius:20px;padding:5px 14px;font-size:13.5px;backdrop-filter:blur(4px);
+  }
+  .stamp-box b{color:#ffd76a;font-size:15px;}
+  #helpBtn,#moreBtn,#musicBtn{
+    pointer-events:auto;border:none;cursor:pointer;font-family:inherit;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);
+    color:#fff;border-radius:20px;padding:5px 14px;font-size:13.5px;
+  }
+  #helpBtn:hover,#moreBtn:hover,#musicBtn:hover{background:rgba(255,255,255,.28);}
+  #musicBtn.on{background:rgba(255,215,106,.9);color:#5a3d00;border-color:#ffd76a;font-weight:700;}
+  #musicBtn:disabled{opacity:.5;cursor:not-allowed;}
+  .title .credit{color:#ffd76a;}
+  .intro-foot{cursor:text;border-radius:8px;padding:2px 10px;transition:.2s;}
+  .intro-foot:hover{background:rgba(201,154,60,.15);outline:1px dashed #d8c58c;}
+
+  /* ===== 底部路线导航 ===== */
+  #routebar{
+    position:fixed;bottom:0;left:0;right:0;z-index:30;
+    display:flex;justify-content:center;gap:8px;padding:12px 10px 16px;
+    background:linear-gradient(0deg,rgba(20,26,36,.85),rgba(20,26,36,0));
+    flex-wrap:wrap;
+  }
+  .route-stop{
+    display:flex;align-items:center;gap:6px;cursor:pointer;
+    border:1.5px solid rgba(255,255,255,.35);border-radius:22px;
+    background:rgba(255,255,255,.10);color:#e8e8e8;
+    padding:7px 14px;font-size:13.5px;font-family:inherit;transition:.25s;backdrop-filter:blur(4px);
+  }
+  .route-stop .no{
+    display:inline-flex;width:20px;height:20px;border-radius:50%;
+    background:rgba(255,255,255,.22);align-items:center;justify-content:center;
+    font-size:11.5px;font-weight:700;
+  }
+  .route-stop:hover{background:rgba(255,255,255,.25);}
+  .route-stop.active{background:#c99a3c;border-color:#ffd76a;color:#3a2a00;font-weight:800;}
+  .route-stop.active .no{background:#fff;color:#8a5b00;}
+  .route-stop.visited .no::after{content:"✓";}
+
+  /* ===== 热点 ===== */
+  #hotspots{position:fixed;inset:0;z-index:20;pointer-events:none;}
+  .hs{
+    position:absolute;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:5px;user-select:none;
+  }
+  .hs .ring{
+    width:44px;height:44px;border-radius:50%;
+    background:radial-gradient(circle at 34% 30%, #ffe9a8, #e0a52e 62%, #b07b12);
+    box-shadow:0 0 0 4px rgba(255,215,106,.35), 0 4px 14px rgba(0,0,0,.45);
+    display:flex;align-items:center;justify-content:center;
+    font-size:21px;color:#5a3d00;font-weight:900;
+    animation:pulse 1.8s ease-in-out infinite;
+  }
+  .hs.move .ring{
+    background:radial-gradient(circle at 34% 30%, #b8f0d2, #3f9e6e 62%, #22674a);
+    color:#0d3a24;font-size:22px;
+  }
+  @keyframes pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.12);}}
+  .hs .label{
+    background:rgba(20,26,36,.78);color:#fff;font-size:12.5px;
+    padding:4px 10px;border-radius:12px;white-space:nowrap;max-width:220px;
+    text-align:center;line-height:1.4;backdrop-filter:blur(3px);
+  }
+  .hs.move .label{background:rgba(20,90,58,.82);}
+
+  /* ===== 场景切换箭头（拖到边缘出现） ===== */
+  .edge-arrow{
+    position:fixed;top:50%;transform:translateY(-50%);z-index:25;
+    width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+    background:rgba(255,215,106,.92);color:#5a3d00;font-size:24px;font-weight:900;
+    box-shadow:0 4px 16px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .3s;
+    font-family:inherit;
+  }
+  .edge-arrow.show{opacity:1;pointer-events:auto;}
+  .edge-arrow .tip{
+    position:absolute;top:-30px;left:50%;transform:translateX(-50%);
+    font-size:11.5px;color:#fff;background:rgba(20,26,36,.75);
+    padding:3px 8px;border-radius:10px;white-space:nowrap;
+  }
+  #edgeRight{right:18px;}
+  #edgeLeft{left:18px;}
+
+  /* ===== 遮罩过渡 ===== */
+  #fade{position:fixed;inset:0;background:#0b0f16;z-index:40;opacity:0;pointer-events:none;transition:opacity .4s;}
+  #fade.on{opacity:1;}
+
+  /* ===== 弹窗 ===== */
+  #modalMask{
+    position:fixed;inset:0;z-index:50;background:rgba(10,14,20,.55);
+    display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);
+  }
+  #modalMask.show{display:flex;}
+  #modal{
+    width:min(620px,94vw);max-height:86vh;overflow:auto;
+    background:#fffdf7;border-radius:18px;border:1px solid #e8dfc8;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);padding:22px 24px;
+  }
+  #modal .m-tag{
+    display:inline-block;background:#8b1a1a;color:#fff;font-size:12px;
+    border-radius:10px;padding:3px 10px;margin-bottom:8px;letter-spacing:1px;
+  }
+  #modal h3{font-size:19px;color:#8b1a1a;margin-bottom:10px;line-height:1.5;}
+  #modal .m-quote{
+    background:#f7f1e3;border-left:4px solid #c99a3c;border-radius:8px;
+    padding:10px 14px;font-size:15px;line-height:1.9;color:#4a4234;margin-bottom:14px;
+  }
+  .opt{
+    display:block;width:100%;text-align:left;border:1.5px solid #ddd2ba;background:#fff;
+    border-radius:10px;padding:11px 14px;font-size:15px;font-family:inherit;
+    cursor:pointer;margin-bottom:8px;line-height:1.6;transition:.2s;
+  }
+  .opt:hover{border-color:#c99a3c;}
+  .opt.right{background:#e3efe9;border-color:#2f6e5d;color:#1e5c3f;font-weight:700;}
+  .opt.wrongpick{background:#fbeae7;border-color:#c0392b;}
+  .opt:disabled{cursor:default;}
+  .m-feedback{
+    display:none;margin-top:10px;padding:10px 14px;border-radius:10px;
+    font-size:14.5px;line-height:1.8;
+  }
+  .m-feedback.ok{display:block;background:#e3efe9;color:#1e5c3f;}
+  .m-feedback.err{display:block;background:#fbeae7;color:#a93226;}
+  .m-tip{
+    margin-top:12px;font-size:13px;color:#7a6a45;background:#faf3e0;
+    border:1px dashed #d8c58c;border-radius:10px;padding:9px 12px;line-height:1.8;
+  }
+  .m-tip b{color:#a37518;}
+  .match-row{margin-bottom:16px;}
+  .match-row .sent{
+    background:#f7f1e3;border-radius:8px;padding:10px 14px;font-size:15.5px;
+    line-height:1.8;margin-bottom:8px;border-left:4px solid #8b1a1a;
+  }
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    border:1.5px solid #ddd2ba;background:#fff;border-radius:18px;
+    padding:7px 16px;font-size:14.5px;cursor:pointer;font-family:inherit;transition:.2s;
+  }
+  .chip:hover{border-color:#c99a3c;}
+  .chip.right{background:#e3efe9;border-color:#2f6e5d;color:#1e5c3f;font-weight:700;}
+  .chip.wrongpick{background:#fbeae7;border-color:#c0392b;animation:shake .4s;}
+  @keyframes shake{0%,100%{transform:translateX(0);}25%{transform:translateX(-5px);}75%{transform:translateX(5px);}}
+  .guide-lv{
+    background:#fff;border:1.5px solid #e4dbc4;border-radius:10px;
+    padding:10px 14px;margin-bottom:9px;font-size:14.5px;line-height:1.9;
+  }
+  .guide-lv b{color:#8b1a1a;}
+  .guide-sample{background:#e9f2ec;border-left:4px solid #2f6e5d;}
+  .guide-sample .lab{font-size:12px;color:#2f6e5d;font-weight:700;}
+  .m-btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+  .m-btn{
+    border:none;cursor:pointer;font-family:inherit;font-size:14.5px;
+    background:#8b1a1a;color:#fff;border-radius:22px;padding:9px 22px;transition:.2s;
+  }
+  .m-btn:hover{transform:translateY(-1px);}
+  .m-btn.green{background:#2f6e5d;}
+  .m-btn.ghost{background:#fff;color:#8b1a1a;border:1.5px solid #8b1a1a;}
+
+  /* ===== 开始页 ===== */
+  #intro{
+    position:fixed;inset:0;z-index:60;
+    background:linear-gradient(150deg,#233248 0%,#1a2636 55%,#243b2f 100%);
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  #intro.hide{display:none;}
+  .intro-card{
+    max-width:640px;width:100%;background:rgba(255,253,247,.97);
+    border-radius:22px;padding:34px 36px;text-align:center;
+    box-shadow:0 24px 80px rgba(0,0,0,.5);border:1px solid #e8dfc8;
+  }
+  .intro-card .kicker{font-size:13px;color:#a37518;letter-spacing:3px;margin-bottom:8px;}
+  .intro-card h1{font-size:30px;color:#8b1a1a;letter-spacing:4px;margin-bottom:6px;}
+  .intro-card .sub{font-size:14px;color:#7a7266;margin-bottom:18px;}
+  .how{
+    text-align:left;background:#f7f1e3;border-radius:14px;padding:16px 20px;
+    font-size:14.5px;line-height:2.1;color:#4a4234;margin-bottom:20px;
+  }
+  .how b{color:#8b1a1a;}
+  .how .ic{display:inline-block;width:26px;text-align:center;}
+  #startBtn{
+    border:none;cursor:pointer;font-family:inherit;font-size:17px;font-weight:700;
+    background:linear-gradient(120deg,#c99a3c,#a83232);color:#fff;
+    border-radius:28px;padding:13px 46px;letter-spacing:4px;
+    box-shadow:0 8px 24px rgba(150,60,30,.4);transition:.25s;
+  }
+  #startBtn:hover{transform:translateY(-2px) scale(1.02);}
+  .intro-foot{margin-top:14px;font-size:11.5px;color:#9a9284;}
+
+  /* ===== 徽章弹窗 ===== */
+  #badgeMask{
+    position:fixed;inset:0;z-index:70;background:rgba(10,14,20,.6);
+    display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);
+  }
+  #badgeMask.show{display:flex;}
+  .badge-card{
+    background:linear-gradient(150deg,#fffdf7,#fdf3dd);
+    border:2px solid #d8b25a;border-radius:22px;padding:34px 40px;
+    text-align:center;max-width:420px;width:100%;box-shadow:0 20px 70px rgba(0,0,0,.5);
+  }
+  .badge-card .medal{font-size:58px;}
+  .badge-card h2{color:#8b1a1a;font-size:23px;margin:10px 0 6px;}
+  .badge-card p{color:#7a7266;font-size:14px;line-height:1.9;}
+
+  @media (max-width:640px){
+    #topbar .title{font-size:14px;}
+    .route-stop{padding:6px 10px;font-size:12px;}
+    .intro-card{padding:26px 20px;}
+    .intro-card h1{font-size:24px;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hotspots"></div>
+
+<button class="edge-arrow" id="edgeLeft"><span class="tip" id="edgeLeftTip"></span>‹</button>
+<button class="edge-arrow" id="edgeRight"><span class="tip" id="edgeRightTip"></span>›</button>
+
+<div id="topbar">
+  <div class="title">18 颐和园 · VR游园课堂<small>语文四年级上册 ｜ 拖动环视 · 滚轮缩放 · 点击光点互动</small><small class="credit">制作：数智化教学大冯老师@冯萌刚</small></div>
+  <div class="spacer"></div>
+  <div class="stamp-box">🎫 游园印章 <b id="stampCount">0</b>/12</div>
+  <button id="helpBtn">？操作说明</button>
+  <button id="moreBtn">🎁 更多资源</button>
+  <button id="musicBtn">🎵 音乐</button>
+</div>
+
+<div id="routebar"></div>
+
+<div id="modalMask">
+  <div id="modal"></div>
+</div>
+
+<div id="fade"></div>
+
+<div id="intro">
+  <div class="intro-card">
+    <div class="kicker">义务教育教科书·语文四年级上册 · 第18课</div>
+    <h1>颐和园 · VR游园课堂</h1>
+    <div class="sub">跟着课文去游园——长廊 → 万寿山 → 昆明湖 → 十七孔桥 · 石舫</div>
+    <div class="how">
+      <b>📚 游园须知（怎么玩）</b><br>
+      <span class="ic">🖱️</span> 按住鼠标左键<b>左右拖动</b>：环视眼前美景（触屏拖动同样有效）<br>
+      <span class="ic">🔍</span> 滚动<b>鼠标滚轮</b>：镜头拉远拉近（缩放），细看每一处美景<br>
+      <span class="ic">✨</span> 点击画面中的<b>金色光点</b>：进入课堂互动，答对可得游园印章<br>
+      <span class="ic">🚶</span> 点击画面里的<b>绿色箭头</b>：走向下一处景点，场景缩放进入<br>
+      <span class="ic">🗺️</span> 点击<b>底部路线图</b>：任意跳转 6 个景点<br>
+      <span class="ic">🎵</span> 准备好的<b>音乐文件改名为 1.mp3</b>，与课件放在同一文件夹，即可正常播放<br>
+      <span class="ic">🎫</span> 集满 <b>12 枚印章</b>，成为"游园小达人"！
+    </div>
+    <button id="startBtn">开 始 游 园</button>
+    <div class="intro-foot" id="lecturer" contenteditable="true" spellcheck="false" title="点击文字即可手动修改授课人">授课人：冯萌刚</div>
+  </div>
+</div>
+
+<div id="badgeMask">
+  <div class="badge-card">
+    <div class="medal">🏅</div>
+    <h2>恭喜你！游园小达人</h2>
+    <p id="badgeText">12 枚游园印章已集齐！<br>颐和园到处有美丽的景色，说也说不尽，希望你有机会去细细游赏。</p>
+    <div class="m-btns" style="justify-content:center;">
+      <button class="m-btn green" onclick="closeBadge()">继续游园</button>
+    </div>
+  </div>
+</div>
+
+<script>__THREE_JS__</script>
+<script>
+/* ================= 素材（base64 内嵌，离线可用） ================= */
+const IMGS = {
+  s1:"__IMG_s1__",
+  s2:"__IMG_s2__",
+  s3:"__IMG_s3__",
+  s4:"__IMG_s4__",
+  s5:"__IMG_s5__",
+  s6:"__IMG_s6__"
+};
+
+/* ================= 场景与互动数据 ================= */
+const SCENES = [
+  { id:"s1", name:"长廊", stop:"① 长 廊", tex:IMGS.s1, initialYaw:0,
+    hotspots:[
+      { yaw:-24, pitch:0, icon:"📖", type:"quiz", title:"数字里的发现", tag:"精读 · 第2自然段",
+        quote:"这条长廊有七百多米长，分成273间。",
+        q:"课文用哪些数字写长廊的“长”？",
+        opts:["七百多米长，分成273间","一千多米长，分成173间","七百多米长，分成372间"], a:0,
+        explain:"✔ “七百多米”“273间”，用数字把长廊的“长”写得具体可信。去掉数字再读一读，味道就淡多了！",
+        tip:"追问：把数字删掉再读，效果有什么不同？引导学生体会“用数字把特点写具体”。" },
+      { yaw:18, pitch:2, icon:"🎨", type:"quiz", title:"横槛上的画", tag:"精读 · 第2自然段",
+        quote:"每一间的横槛上都画着五彩的画，画着人物、花草、风景，几千幅画没有哪两幅是相同的。",
+        q:"“几千幅画没有哪两幅是相同的”，你体会到了什么？",
+        opts:["画太多，看不过来","古代工匠技艺精湛，幅幅不同","这些画都差不多"], a:1,
+        explain:"✔ 几千幅画各不相同，这是多么惊人的工艺！记住这句话，后面还有一句和它遥相呼应。",
+        tip:"引导学生想象自己走在长廊里抬头看画，读出赞叹的语气。" },
+      { yaw:40, pitch:-2, icon:"🚶", type:"move", target:1, label:"走完长廊，就来到了万寿山脚下" }
+    ]},
+  { id:"s2", name:"万寿山脚下", stop:"② 万寿山脚下", tex:IMGS.s2, initialYaw:0,
+    hotspots:[
+      { yaw:-22, pitch:6, icon:"🔠", type:"quiz", title:"品“耸立”", tag:"精读 · 第3自然段",
+        quote:"抬头一看，一座八角宝塔形的三层建筑耸立在半山腰上，黄色的琉璃瓦闪闪发光，那就是佛香阁。",
+        q:"“耸立”写出了佛香阁的什么特点？",
+        opts:["又高又直地立着，很有气势","快要倒下来了","隐隐约约看不清"], a:0,
+        explain:"✔ “耸立”= 高高地直立，写出了佛香阁的高大气势。朗读时把这个词读得重一些！",
+        tip:"对比品词：换成“站立”“挺立”好不好？为什么“耸立”最有气势？" },
+      { yaw:16, pitch:-4, icon:"🏛", type:"quiz", title:"金碧辉煌的宫殿", tag:"精读 · 第3自然段",
+        quote:"下面的一排排金碧辉煌的宫殿，就是排云殿。",
+        q:"“金碧辉煌”在句中形容什么？",
+        opts:["湖水碧绿发亮","排云殿等宫殿华丽、光彩夺目","石狮子雕刻得精致"], a:1,
+        explain:"✔ “金碧辉煌”形容建筑物华丽明亮、光彩夺目，多用来描写皇家宫殿。",
+        tip:"请学生看画面找一找：哪些地方能看出“金碧辉煌”？" },
+      { yaw:42, pitch:0, icon:"🚶", type:"move", target:2, label:"登上万寿山，向下望" }
+    ]},
+  { id:"s3", name:"万寿山·俯瞰", stop:"③ 万寿山", tex:IMGS.s3, initialYaw:0,
+    hotspots:[
+      { yaw:-26, pitch:2, icon:"🪞", type:"match", title:"比喻句配对", tag:"精读 · 第4自然段",
+        quote:"正前面，昆明湖静得像一面镜子，绿得像一块碧玉。",
+        rows:[
+          { sent:"昆明湖<b>静</b>得像（　）", opts:["一面镜子","一艘画舫","一块翡翠"], a:0,
+            why:"✔ 比作镜子，写出湖水的“静”——船滑过几乎不留痕迹。" },
+          { sent:"昆明湖<b>绿</b>得像（　）", opts:["白银盘","一块碧玉","蓝宝石"], a:1,
+            why:"✔ 比作碧玉，写出湖水的“绿”，温润有光泽。" }
+        ],
+        tip:"齐读并尝试背诵这个比喻句；追问：作者为什么不说“很静很绿”？体会比喻的表达效果。" },
+      { yaw:20, pitch:-6, icon:"🛶", type:"quiz", title:"“滑”字的妙处", tag:"精读 · 第4自然段",
+        quote:"游船、画舫在湖面慢慢地滑过，几乎不留一点儿痕迹。",
+        q:"句中的“滑”能换成“驶”吗？",
+        opts:["能，意思完全一样","不能，“滑”写出湖面平静、船轻快","不能，因为船没有轮子"], a:1,
+        explain:"✔ 湖面静得像镜子，船像在镜子上轻轻滑过——一个“滑”字，静意全出！",
+        tip:"用换词比较法：让学生分别读“滑过”“驶过”，体会用词的精准。" },
+      { yaw:44, pitch:-2, icon:"🚶", type:"move", target:3, label:"从万寿山下来，就是昆明湖" }
+    ]},
+  { id:"s4", name:"昆明湖·远眺", stop:"④ 昆明湖", tex:IMGS.s4, initialYaw:0,
+    hotspots:[
+      { yaw:-24, pitch:0, icon:"🌉", type:"quiz", title:"数一数桥洞", tag:"精读 · 第5自然段",
+        quote:"这座石桥有十七个桥洞，叫十七孔桥。",
+        q:"十七孔桥有几个桥洞？桥的名字是怎么来的？",
+        opts:["13个，按省份命名","15个，按月亮圆缺命名","17个，桥洞数就是名字"], a:2,
+        explain:"✔ 十七个桥洞，桥名就是这么来的！桥栏杆上还有上百根石柱呢。",
+        tip:"让学生在画面上找一找桥洞，再读句子，体会数字的说明效果。" },
+      { yaw:18, pitch:-4, icon:"✍️", type:"quiz", title:"过渡句填一填", tag:"整体感知 · 游览顺序",
+        quote:"作者游颐和园：进了大门→长廊→万寿山脚下→万寿山→？",
+        q:"“从万寿山下来，就是____。”",
+        opts:["长廊","排云殿","昆明湖"], a:2,
+        explain:"✔ 过渡句像小导游，带着读者的脚步移动——这就是“移步换景”的写法。",
+        tip:"请学生完整说出游览路线，为单元习作《游____》做铺垫。" },
+      { yaw:44, pitch:0, icon:"🚶", type:"move", target:4, label:"走过长长的石桥，去看桥栏上的小狮子" }
+    ]},
+  { id:"s5", name:"十七孔桥·石狮", stop:"⑤ 十七孔桥", tex:IMGS.s5, initialYaw:0,
+    hotspots:[
+      { yaw:-20, pitch:-2, icon:"🦁", type:"quiz", title:"呼应的密码", tag:"精读 · 第5自然段",
+        quote:"这么多的狮子，姿态不一，没有哪两只是相同的。",
+        q:"长廊的画“没有哪两幅是相同的”，这里的狮子“没有哪两只是相同的”。两句都在赞美什么？",
+        opts:["动物和画都很多","古代劳动人民的智慧和精湛技艺","颐和园的游客很多"], a:1,
+        explain:"✔ 两句异曲同工：画一幅一个样，狮子一只一个样——精湛技艺令人赞叹！",
+        tip:"前后勾连朗读两句，体会作者反复用“没有哪两个相同”表达赞美。" },
+      { yaw:20, pitch:0, icon:"🎤", type:"guide", title:"小导游任务", tag:"口语实践 · 师生互动",
+        task:"请你当小导游，向“游客”（同学）介绍眼前的一处景点：长廊、佛香阁、昆明湖或十七孔桥。",
+        levels:[
+          "★ 基础关：用句式说——“各位游客，我们现在来到的是____，它的特点是____，请看____。”",
+          "★★ 进阶关：按“抬头一看 / 向下望 / 走过石桥”等观察顺序，把两三处景物连起来说。",
+          "★★★ 挑战关：用上课文中的数字（七百多米、273间、十七个桥洞）和比喻句，加上自己的想象。"
+        ],
+        sample:"各位游客，请看——这么多的狮子，姿态不一，没有哪两只是相同的！它们雕刻在上百根石柱上，个个栩栩如生，多么了不起的雕工呀！",
+        tip:"同桌互评：顺序清☆ 特点明☆ 佳句妙☆，两项以上即“金牌小导游”。教师随机抽 1-2 名全班展示。" },
+      { yaw:44, pitch:-2, icon:"🚶", type:"move", target:5, label:"沿湖边走一走，去看有名的石舫" }
+    ]},
+  { id:"s6", name:"石舫", stop:"⑥ 石 舫", tex:IMGS.s6, initialYaw:0,
+    hotspots:[
+      { yaw:-24, pitch:0, icon:"📜", type:"quiz", title:"世界遗产资料卡", tag:"拓展 · 文化自信",
+        quote:"1998年12月2日，颐和园被联合国教科文组织列入《世界遗产名录》。",
+        q:"颐和园是在哪一年被列入《世界遗产名录》的？",
+        opts:["1949年","1998年","2008年"], a:1,
+        explain:"✔ 1998年！颐和园历经战火与重修，今天的游赏来之不易。你还知道哪些“中国的世界文化遗产”？",
+        tip:"联结课后资料卡：请学生交流自己了解到的中国的世界文化遗产，激发自豪感。" },
+      { yaw:20, pitch:-2, icon:"🔍", type:"quiz", title:"中心句的作用", tag:"整体感知 · 篇章结构",
+        quote:"北京的颐和园是个美丽的大公园。……颐和园到处有美丽的景色，说也说不尽，希望你有机会去细细游赏。",
+        q:"“北京的颐和园是个美丽的大公园”这句话在全文中起什么作用？",
+        opts:["总起全文，点出“美丽”","总结全文","表示过渡"], a:0,
+        explain:"✔ 这是全文的中心句，总起全文；结尾“说也说不尽”又与它呼应，结构是“总—分—总”。",
+        tip:"引导学生回顾全篇结构：中心句总起——移步换景分述——结尾呼应总结。" },
+      { yaw:44, pitch:0, icon:"🚶", type:"move", target:3, label:"回到昆明湖，再看一眼湖光山色" }
+    ]}
+];
+
+/* ================= Three.js 场景 ================= */
+const R = 50, THETA = Math.PI, FOV = 60;
+const YAW_LIMIT = 0.58, PITCH_LIMIT = 0.20;
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x141a22);
+const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth/window.innerHeight, 0.1, 300);
+camera.rotation.order = 'YXZ';
+const FOV_MIN = 32, FOV_MAX = 95;        /* 滚轮缩放范围：fov 越小越近（放大），越大越远（拉远） */
+const sceneFov = SCENES.map(()=>FOV);    /* 每个场景独立记忆镜头远近 */
+
+function makeTex(dataUrl){
+  return new Promise(res=>{
+    const im = new Image();
+    im.onload = ()=>{
+      const t = new THREE.Texture(im);
+      t.encoding = THREE.sRGBEncoding;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.generateMipmaps = false;
+      t.wrapS = THREE.RepeatWrapping;
+      t.repeat.x = -1;          /* 内表面镜像修正 */
+      t.offset.x = 1;
+      t.needsUpdate = true;
+      res(t);
+    };
+    im.src = dataUrl;
+  });
+}
+const H_CYL = R*THETA/(1600/893);
+const geo = new THREE.CylinderGeometry(R,R,H_CYL,72,1,true,Math.PI/2,THETA);
+
+const matA = new THREE.MeshBasicMaterial({side:THREE.BackSide, transparent:true, opacity:1});
+const matB = new THREE.MeshBasicMaterial({side:THREE.BackSide, transparent:true, opacity:0});
+const cylA = new THREE.Mesh(geo, matA);
+const cylB = new THREE.Mesh(geo, matB);
+scene.add(cylA, cylB);
+
+/* ================= 状态与切换 ================= */
+let cur = 0, yaw = 0, pitch = 0, tYaw = 0, tPitch = 0;
+let switching = false;
+const textures = {};
+const fadeEl = document.getElementById('fade');
+
+async function preload(){
+  for(const s of SCENES){ textures[s.id] = await makeTex(s.tex); }
+  matA.map = textures[SCENES[0].id]; matA.needsUpdate = true;
+}
+function goScene(i, instant){
+  if(switching || i===cur) return;
+  switching = true;
+  /* 旧场景：缩小 + 淡出 */
+  app.classList.add('t-out'); hsLayer.classList.add('t-out');
+  const swap = ()=>{
+    cur = i;
+    const s = SCENES[i];
+    matA.map = textures[s.id]; matA.needsUpdate = true;
+    yaw = tYaw = s.initialYaw||0; pitch = tPitch = 0;
+    camera.fov = sceneFov[i]; camera.updateProjectionMatrix();
+    buildHotspots(); updateRoute();
+    /* 切到新场景：先置于「由小放大」起始态，再移除触发缩放进入动画 */
+    app.classList.remove('t-out'); hsLayer.classList.remove('t-out');
+    app.classList.add('t-in'); hsLayer.classList.add('t-in');
+    void app.offsetWidth;                 /* 强制回流，确保起始态生效 */
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      app.classList.remove('t-in'); hsLayer.classList.remove('t-in');
+    }));
+  };
+  const settle = ()=>{ switching=false; };
+  if(instant){ swap(); settle(); return; }
+  setTimeout(swap, 210);
+  setTimeout(settle, 210+480);
+}
+
+/* ================= 交互拖动 ================= */
+let dragging=false, lastX=0, lastY=0;
+const appEl = document.getElementById('app');
+appEl.addEventListener('pointerdown', e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;appEl.classList.add('dragging');});
+window.addEventListener('pointerup', ()=>{dragging=false;appEl.classList.remove('dragging');});
+window.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  tYaw   -= (e.clientX-lastX)*0.0021;
+  tPitch += (e.clientY-lastY)*0.0019;
+  tYaw   = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, tYaw));
+  tPitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, tPitch));
+  lastX=e.clientX; lastY=e.clientY;
+});
+
+/* ================= 滚轮缩放（镜头拉远拉近） ================= */
+window.addEventListener('wheel', e=>{
+  if(mask.classList.contains('show')) return;   /* 弹窗打开时让页面正常滚动 */
+  e.preventDefault();
+  const step = (e.deltaY>0 ? 1 : -1) * 4;       /* 向下滚=拉远(fov变大)，向上滚=拉近(fov变小) */
+  const f = Math.max(FOV_MIN, Math.min(FOV_MAX, sceneFov[cur] + step));
+  sceneFov[cur] = f;
+  camera.fov = f; camera.updateProjectionMatrix();
+}, {passive:false});
+
+/* ================= 热点 ================= */
+const hsLayer = document.getElementById('hotspots');
+function anchorPos(yawDeg, pitchDeg){
+  const a = yawDeg*Math.PI/180, p = pitchDeg*Math.PI/180;
+  return new THREE.Vector3(R*Math.sin(a), R*Math.tan(p)*0.9, -R*Math.cos(a));
+}
+function buildHotspots(){
+  hsLayer.innerHTML='';
+  const s = SCENES[cur];
+  s.hotspots.forEach((h,idx)=>{
+    const d = document.createElement('div');
+    d.className = 'hs'+(h.type==='move'?' move':'');
+    d.innerHTML = `<div class="ring">${h.icon||'✦'}</div><div class="label">${h.title||h.label}</div>`;
+    d.addEventListener('click', ev=>{ev.stopPropagation(); openHotspot(h);});
+    d._anchor = anchorPos(h.yaw, h.pitch);
+    hsLayer.appendChild(d);
+  });
+}
+const _v = new THREE.Vector3();
+function layoutHotspots(){
+  const w = window.innerWidth, h = window.innerHeight;
+  for(const d of hsLayer.children){
+    _v.copy(d._anchor).applyMatrix4(camera.matrixWorldInverse);
+    if(_v.z > -1){ d.style.display='none'; continue; }
+    _v.copy(d._anchor).project(camera);
+    if(_v.x<-1.05||_v.x>1.05||_v.y<-1.05||_v.y>1.05){ d.style.display='none'; continue; }
+    d.style.display='flex';
+    d.style.left = ((_v.x+1)/2*w)+'px';
+    d.style.top  = ((1-_v.y)/2*h)+'px';
+  }
+}
+
+/* ================= 边缘箭头 ================= */
+const edgeR = document.getElementById('edgeRight'), edgeL = document.getElementById('edgeLeft');
+const tipR = document.getElementById('edgeRightTip'), tipL = document.getElementById('edgeLeftTip');
+function updateEdges(){
+  const s = SCENES[cur];
+  const fwd = s.hotspots.find(x=>x.type==='move' && x.yaw>30);
+  const bwd = s.hotspots.find(x=>x.type==='move' && x.yaw<-5);
+  if(fwd && tYaw > YAW_LIMIT*0.82){ edgeR.classList.add('show'); tipR.textContent=fwd.label; }
+  else edgeR.classList.remove('show');
+  if(bwd && tYaw < -YAW_LIMIT*0.82){ edgeL.classList.add('show'); tipL.textContent=bwd.label; }
+  else edgeL.classList.remove('show');
+}
+edgeR.addEventListener('click', e=>{e.stopPropagation(); const f=SCENES[cur].hotspots.find(x=>x.type==='move'&&x.yaw>30); if(f) goScene(f.target);});
+edgeL.addEventListener('click', e=>{e.stopPropagation(); const f=SCENES[cur].hotspots.find(x=>x.type==='move'&&x.yaw<-5); if(f) goScene(f.target);});
+
+/* ================= 路线导航 ================= */
+const routebar = document.getElementById('routebar');
+SCENES.forEach((s,i)=>{
+  const b = document.createElement('button');
+  b.className='route-stop'; b.innerHTML=`<span class="no">${i+1}</span>${s.stop.replace(/^[⑥⑤④③②①]\s*/,'')}`;
+  b.addEventListener('click', ()=>goScene(i));
+  routebar.appendChild(b);
+});
+const visited = new Set([0]);
+function updateRoute(){
+  visited.add(cur);
+  [...routebar.children].forEach((b,i)=>{
+    b.classList.toggle('active', i===cur);
+    b.classList.toggle('visited', visited.has(i)&&i!==cur);
+  });
+}
+
+/* ================= 印章 ================= */
+let stamps = {};
+try{ stamps = JSON.parse(localStorage.getItem('yy_vr_stamps')||'{}'); }catch(e){ stamps = {}; }
+const stampEl = document.getElementById('stampCount');
+function stampCount(){ return Object.keys(stamps).length; }
+function refreshStamps(){ stampEl.textContent = stampCount(); localStorage.setItem('yy_vr_stamps', JSON.stringify(stamps)); }
+function award(key){
+  if(stamps[key]) return false;
+  stamps[key] = 1; refreshStamps();
+  if(stampCount()>=12) setTimeout(()=>document.getElementById('badgeMask').classList.add('show'), 600);
+  return true;
+}
+function closeBadge(){ document.getElementById('badgeMask').classList.remove('show'); }
+refreshStamps();
+
+/* ================= 弹窗互动 ================= */
+const mask = document.getElementById('modalMask');
+const modal = document.getElementById('modal');
+function openHotspot(h){
+  if(h.type==='move'){ goScene(h.target); return; }
+  if(h.type==='quiz') renderQuiz(h);
+  if(h.type==='match') renderMatch(h);
+  if(h.type==='guide') renderGuide(h);
+  mask.classList.add('show');
+}
+function headHTML(h){
+  return `<span class="m-tag">${h.tag||'课堂互动'}</span><h3>${h.icon||'✦'} ${h.title}</h3>`
+    + (h.quote?`<div class="m-quote">📄 课文原句：${h.quote}</div>`:'');
+}
+function tipHTML(t){ return t?`<div class="m-tip"><b>👩‍🏫 教师提示：</b>${t}</div>`:''; }
+function footHTML(h){
+  return `<div class="m-btns">
+    <button class="m-btn ghost" onclick="closeModal()">关闭</button>
+    ${h.type!=='guide'?'<button class="m-btn green" onclick="retryHotspot()">再试一次</button>':''}
+  </div>`;
+}
+let curHotspot = null;
+function renderQuiz(h){
+  curHotspot = h;
+  modal.innerHTML = headHTML(h)
+    + `<div style="font-size:16px;font-weight:700;margin-bottom:12px;line-height:1.8;">${h.q}</div>`
+    + `<div id="optBox">${h.opts.map((o,i)=>`<button class="opt" data-i="${i}" onclick="pickOpt(this,${i})">${String.fromCharCode(65+i)}．${o}</button>`).join('')}</div>`
+    + `<div class="m-feedback" id="mFb"></div>` + tipHTML(h.tip) + footHTML(h);
+}
+window.pickOpt = function(btn, i){
+  const h = curHotspot;
+  const box = document.getElementById('optBox');
+  [...box.children].forEach(b=>b.disabled=true);
+  const fb = document.getElementById('mFb');
+  if(i===h.a){
+    btn.classList.add('right'); fb.className='m-feedback ok';
+    fb.innerHTML = h.explain + (award(h.title) ? '<br>🎫 获得 1 枚游园印章！' : '');
+  }else{
+    btn.classList.add('wrongpick');
+    box.children[h.a].classList.add('right');
+    fb.className='m-feedback err';
+    fb.innerHTML = '再想一想，回到画面里找找线索！'+ (h.explain? '<br>'+h.explain.replace(/^✔/,'提示：') : '');
+  }
+};
+function renderMatch(h){
+  curHotspot = h;
+  let done = 0;
+  modal.innerHTML = headHTML(h)
+    + h.rows.map((r,ri)=>`
+      <div class="match-row" data-ok="0">
+        <div class="sent">${r.sent}</div>
+        <div class="chips">${r.opts.map((o,oi)=>`<button class="chip" onclick="pickChip(this,${ri},${oi})">${o}</button>`).join('')}</div>
+        <div class="m-feedback" id="mfb${ri}"></div>
+      </div>`).join('')
+    + tipHTML(h.tip) + footHTML(h);
+  window._matchDone = ()=>{ done++; if(done===h.rows.length){ award(h.title);
+    const fb=document.createElement('div'); fb.className='m-feedback ok';
+    fb.innerHTML='🎫 比喻句全配对了，获得 1 枚游园印章！'; modal.querySelector('.m-tip').before(fb); } };
+}
+window.pickChip = function(btn, ri, oi){
+  const h = curHotspot, row = h.rows[ri];
+  const rowEl = modal.querySelectorAll('.match-row')[ri];
+  if(rowEl.dataset.ok==='1') return;
+  const fb = document.getElementById('mfb'+ri);
+  if(oi===row.a){
+    btn.classList.add('right'); rowEl.dataset.ok='1';
+    fb.className='m-feedback ok'; fb.innerHTML=row.why;
+    [...rowEl.querySelectorAll('.chip')].forEach(c=>{c.disabled=true;});
+    rowEl.querySelectorAll('.chip')[row.a].classList.add('right');
+    window._matchDone();
+  }else{
+    btn.classList.add('wrongpick');
+    setTimeout(()=>btn.classList.remove('wrongpick'),450);
+  }
+};
+function renderGuide(h){
+  curHotspot = h;
+  modal.innerHTML = headHTML(h)
+    + `<div class="m-quote">🎤 ${h.task}</div>`
+    + h.levels.map(l=>`<div class="guide-lv">${l}</div>`).join('')
+    + `<div class="guide-lv guide-sample"><span class="lab">📝 示范参考</span><br>${h.sample}</div>`
+    + tipHTML(h.tip)
+    + `<div class="m-btns">
+        <button class="m-btn ghost" onclick="closeModal()">关闭</button>
+        <button class="m-btn green" id="guideDone">我完成介绍了 ✓</button>
+      </div>`;
+  document.getElementById('guideDone').onclick = ()=>{
+    if(award(h.title)){
+      const b=document.getElementById('guideDone');
+      b.textContent='🎫 获得 1 枚游园印章！'; b.disabled=true; b.style.opacity=.6;
+    }else{
+      const b=document.getElementById('guideDone');
+      b.textContent='已获得过印章 ✓'; b.disabled=true; b.style.opacity=.6;
+    }
+  };
+}
+window.retryHotspot = function(){ if(curHotspot) openHotspot(curHotspot); };
+window.closeModal = function(){ mask.classList.remove('show'); };
+mask.addEventListener('click', e=>{ if(e.target===mask) closeModal(); });
+
+/* ================= 帮助 / 更多资源 ================= */
+const QR_SRC = "__IMG_QR__";
+document.getElementById('helpBtn').addEventListener('click', ()=>{
+  document.getElementById('intro').classList.remove('hide');
+  document.getElementById('startBtn').textContent = '继 续 游 园';
+});
+document.getElementById('moreBtn').addEventListener('click', ()=>{
+  modal.innerHTML = `
+    <div style="text-align:center;">
+      <span class="m-tag">更多资源</span>
+      <h3 style="margin-top:4px;">🎁 扫码关注，收获更多资源与技能</h3>
+      <img src="${QR_SRC}" alt="二维码" style="width:240px;height:240px;border-radius:14px;
+           border:1px solid #e8dfc8;box-shadow:0 6px 20px rgba(0,0,0,.15);margin:10px 0;">
+      <p style="font-size:15.5px;line-height:1.9;color:#4a4234;">
+        扫码关注 <b style="color:#8b1a1a;">“数智化教学大冯老师”</b><br>收获更多资源与技能
+      </p>
+      <div class="m-btns" style="justify-content:center;">
+        <button class="m-btn ghost" onclick="closeModal()">关闭</button>
+      </div>
+    </div>`;
+  mask.classList.add('show');
+});
+
+/* ================= 背景音乐 ================= */
+const musicBtn = document.getElementById('musicBtn');
+let bgm = null, musicOn = false;
+function musicFail(msg){
+  musicBtn.textContent = '🎵 ' + msg;
+  musicBtn.disabled = true;
+  musicBtn.classList.remove('on');
+  musicOn = false;
+}
+musicBtn.addEventListener('click', ()=>{
+  if(!bgm){
+    bgm = new Audio('1.mp3');
+    bgm.loop = true;
+    bgm.addEventListener('error', ()=>musicFail('未找到1.mp3'));
+  }
+  if(!musicOn){
+    bgm.play().then(()=>{
+      musicOn = true;
+      musicBtn.textContent = '⏸ 音乐·播放中';
+      musicBtn.classList.add('on');
+    }).catch(()=>musicFail('播放失败'));
+  }else{
+    bgm.pause();
+    musicOn = false;
+    musicBtn.textContent = '🎵 音乐';
+    musicBtn.classList.remove('on');
+  }
+});
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  document.getElementById('intro').classList.add('hide');
+});
+
+/* ================= 主循环 ================= */
+const params = new URLSearchParams(location.search);
+let startScene = 0;
+if(params.get('scene')){
+  const si = SCENES.findIndex(s=>s.id===params.get('scene'));
+  if(si>=0) startScene = si;
+}
+const skipIntro = params.get('debug')==='1';
+if(skipIntro) document.getElementById('intro').classList.add('hide');
+
+preload().then(()=>{
+  matA.map = textures[SCENES[startScene].id]; matA.needsUpdate = true;
+  camera.fov = sceneFov[startScene]; camera.updateProjectionMatrix();
+  cur = startScene; buildHotspots(); updateRoute();
+  function loop(){
+    requestAnimationFrame(loop);
+    yaw   += (tYaw-yaw)*0.12;
+    pitch += (tPitch-pitch)*0.12;
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+    renderer.render(scene, camera);
+    camera.updateMatrixWorld();
+    layoutHotspots();
+    updateEdges();
+  }
+  loop();
+});
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
